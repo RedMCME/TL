@@ -76,7 +76,17 @@ class TL{
 			$language = $ns->getLanguage($this->defaultLanguage);
 		}
 
-		return $language->getTranslation($key, $params) ?? sprintf("%s:%s", $namespace, $key);
+		$langTranslation = $language->getTranslation($key, $params);
+		if ($langTranslation !== null){
+			return $langTranslation;
+		}
+
+		$defaultLangTranslation = $ns->getLanguage($this->defaultLanguage)->getTranslation($key, $params);
+		if ($defaultLangTranslation !== null){
+			return $defaultLangTranslation;
+		}
+
+		return sprintf("%s:%s", $namespace, $key);
 	}
 }
 
