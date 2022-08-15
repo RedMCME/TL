@@ -12,7 +12,7 @@ class TL{
 	 */
 	private array $namespaces = [];
 
-	private string $defaultNamespace = "default";
+	private string $defaultNamespace = "common";
 	private string $defaultLanguage = "en";
 
 	public static function init(?string $defaultNamespace = null, ?string $defaultLanguage = null): self{
@@ -42,6 +42,24 @@ class TL{
 		if(is_null($this->namespaces[$this->defaultNamespace]->getLanguage($this->defaultLanguage))){
 			throw new \RuntimeException("Default language not found");
 		}
+	}
+
+	/**
+	 * @return \Closure[]
+	 */
+	public function useTranslations(?string $lang, array $namespaces): array{
+		return array_map(function (string $namespace) use ($lang): \Closure{
+			return $this->useTranslation($lang, $namespace);
+		}, $namespaces);
+	}
+
+	/**
+	 * @return \Closure[]
+	 */
+	public function withDefaultNamespace(?string $lang, string ...$namespaces): array{
+		return array_map(function (string $namespace) use ($lang): \Closure{
+			return $this->useTranslation($lang, $namespace);
+		}, array_merge([$this->defaultNamespace], $namespaces));
 	}
 
 	public function useTranslation(?string $lang = null, ?string $namespace = null): \Closure{
@@ -144,7 +162,7 @@ class TLLanguage{
 		}
 
 		foreach($params as $key => $value){
-			$str = str_replace("{{" . $key . "}}", $value, $str);
+			$str = str_replace("{{" . $key . "}}", (string) $value, $str);
 		}
 		return $str;
 	}
