@@ -28,7 +28,12 @@ class TL{
 
 	public function load(string $path): void{
 		// list directories
-		$directories = array_filter(scandir($path), function (string $file) use ($path): bool{
+		$dirs = scandir($path);
+		if($dirs === false){
+			throw new \RuntimeException("Could not scan directory $path");
+		}
+
+		$directories = array_filter($dirs, function(string $file) use ($path): bool{
 			return is_dir($path . "/" . $file) and $file !== "." and $file !== "..";
 		});
 		foreach($directories as $directory){
@@ -45,10 +50,12 @@ class TL{
 	}
 
 	/**
+	 * @param string[] $namespaces
+	 *
 	 * @return \Closure[]
 	 */
 	public function useTranslations(?string $lang, array $namespaces): array{
-		return array_map(function (string $namespace) use ($lang): \Closure{
+		return array_map(function(string $namespace) use ($lang): \Closure{
 			return $this->useTranslation($lang, $namespace);
 		}, $namespaces);
 	}
@@ -57,7 +64,7 @@ class TL{
 	 * @return \Closure[]
 	 */
 	public function withDefaultNamespace(?string $lang, string ...$namespaces): array{
-		return array_map(function (string $namespace) use ($lang): \Closure{
+		return array_map(function(string $namespace) use ($lang): \Closure{
 			return $this->useTranslation($lang, $namespace);
 		}, array_merge([$this->defaultNamespace], $namespaces));
 	}
@@ -69,11 +76,17 @@ class TL{
 		if(!isset($this->namespaces[$namespace])){
 			throw new \InvalidArgumentException("Namespace $namespace does not exist");
 		}
-		return function (string $key, array $params = []) use ($namespace, $lang): string{
+		/**
+		 * @param array<string, mixed> $params
+		 */
+		return function(string $key, array $params = []) use ($namespace, $lang): string{
 			return $this->translate($key, $params, $lang, $namespace);
 		};
 	}
 
+	/**
+	 * @param array<string, mixed> $params
+	 */
 	public function translate(string $key, array $params = [], ?string $lang = null, ?string $namespace = null): string{
 		$namespace ??= $this->defaultNamespace;
 		$lang ??= $this->defaultLanguage;
@@ -90,17 +103,14 @@ class TL{
 				$language = $ns->getLanguage($langParts[0]);
 			}
 		}
-		if(is_null($language)){
-			$language = $ns->getLanguage($this->defaultLanguage);
-		}
 
-		$langTranslation = $language->getTranslation($key, $params);
-		if ($langTranslation !== null){
+		$langTranslation = $language?->getTranslation($key, $params);
+		if($langTranslation !== null){
 			return $langTranslation;
 		}
 
-		$defaultLangTranslation = $ns->getLanguage($this->defaultLanguage)->getTranslation($key, $params);
-		if ($defaultLangTranslation !== null){
+		$defaultLangTranslation = $ns->getLanguage($this->defaultLanguage)?->getTranslation($key, $params);
+		if($defaultLangTranslation !== null){
 			return $defaultLangTranslation;
 		}
 
@@ -123,7 +133,12 @@ class TLNamespace{
 
 	public function load(string $path): void{
 		// list json files
-		$files = array_filter(scandir($path), function (string $file) use ($path): bool{
+		$dirs = scandir($path);
+		if($dirs === false){
+			throw new \RuntimeException("Could not scan directory $path");
+		}
+
+		$files = array_filter($dirs, function(string $file) use ($path): bool{
 			return pathinfo($path . "/" . $file, PATHINFO_EXTENSION) === "json";
 		});
 		foreach($files as $file){
@@ -140,7 +155,7 @@ class TLNamespace{
 
 class TLLanguage{
 	/**
-	 * @var Array<string, string>
+	 * @var array<string, string>
 	 */
 	private array $translations = [];
 
@@ -151,18 +166,44 @@ class TLLanguage{
 		return $this->name;
 	}
 
+	/**
+	 * @throws \JsonException
+	 * @throws \RuntimeException
+	 */
 	public function load(string $path): void{
-		$this->translations = json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+		$file_contents = file_get_contents($path);
+		if($file_contents === false){
+			throw new \RuntimeException("Could not read file $path");
+		}
+
+		$translations = json_decode($file_contents, true, flags: JSON_THROW_ON_ERROR);
+		if (!is_array($translations)){
+			throw new \RuntimeException("Translation data must be an array");
+		}
+
+		foreach($translations as $key => $value){
+			if (!is_string($key)){
+				throw new \RuntimeException("Translation key must be a string");
+			}
+			if (!is_string($value)){
+				throw new \RuntimeException("Translation value must be a string");
+			}
+		}
+
+		$this->translations = $translations;
 	}
 
+	/**
+	 * @param array<string, mixed> $params
+	 */
 	public function getTranslation(string $key, array $params = []): ?string{
 		$str = $this->translations[$key] ?? null;
-		if (is_null($str)) {
+		if(is_null($str)){
 			return null;
 		}
 
 		foreach($params as $key => $value){
-			$str = str_replace("{{" . $key . "}}", (string) $value, $str);
+			$str = str_replace("{{" . $key . "}}", strval($value), $str);
 		}
 		return $str;
 	}
