@@ -7,9 +7,7 @@ declare(strict_types=1);
 namespace xerenahmed\TL;
 
 class TL{
-	/**
-	 * @var TLNamespace[]
-	 */
+	/** @var TLNamespace[] */
 	private array $namespaces = [];
 
 	private string $defaultNamespace = "common";
@@ -64,9 +62,7 @@ class TL{
 	 * @return \Closure[]
 	 */
 	public function withDefaultNamespace(?string $lang, string ...$namespaces): array{
-		return array_map(function(string $namespace) use ($lang): \Closure{
-			return $this->useTranslation($lang, $namespace);
-		}, array_merge([$this->defaultNamespace], $namespaces));
+		return $this->useTranslations($lang, array_merge([$this->defaultNamespace], $namespaces));
 	}
 
 	public function useTranslation(?string $lang = null, ?string $namespace = null): \Closure{
