@@ -1,7 +1,5 @@
 <?php
-// @time 10.08.2022 08:54
-// @author eren
-// "so much depends upon a red wheel barrow..."
+
 declare(strict_types=1);
 
 namespace xerenahmed\TL;
