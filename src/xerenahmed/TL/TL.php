@@ -22,7 +22,7 @@ class TL{
 		return $instance;
 	}
 
-	public function load(string $path): void{
+	public function load(string $path, ?string $prefix = null): void{
 		// list directories
 		$dirs = scandir($path);
 		if($dirs === false){
@@ -30,12 +30,18 @@ class TL{
 		}
 
 		$directories = array_filter($dirs, function(string $file) use ($path): bool{
-			return is_dir($path . "/" . $file) and $file !== "." and $file !== "..";
+			return is_dir($path . "/" . $file) && $file !== "." && $file !== "..";
 		});
 		foreach($directories as $directory){
 			$namespace = new TLNamespace($directory);
-			$this->namespaces[$directory] = $namespace;
 			$namespace->load($path . "/" . $directory);
+			if (!$namespace->isEmpty()){
+				$namespacePath = $directory;
+				if ($prefix !== null) {
+					$namespacePath = $prefix . "." . $namespacePath;
+				}
+				$this->namespaces[$namespacePath] = $namespace;
+			}
 		}
 		if(!isset($this->namespaces[$this->defaultNamespace])){
 			throw new \RuntimeException("Default namespace not found");
@@ -144,6 +150,10 @@ class TLNamespace{
 
 	public function getLanguage(string $name): ?TLLanguage{
 		return $this->languages[$name] ?? null;
+	}
+
+	public function isEmpty(): bool{
+		return empty($this->languages);
 	}
 }
 
