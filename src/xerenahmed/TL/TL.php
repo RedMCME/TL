@@ -4,17 +4,19 @@ declare(strict_types=1);
 
 namespace xerenahmed\TL;
 
-class TL{
-	/** @var TLNamespace[] */
-	private array $namespaces = [];
+use Webmozart\PathUtil\Path;
 
-	private string $defaultNamespace = "common";
+class TL{
+	/** @var array<string, array<string, string>> [language => [project => translation]]*/
+	private array $translations = [];
+
+	private string $defaultProject = "common";
 	private string $defaultLanguage = "en";
 
-	public static function init(?string $defaultNamespace = null, ?string $defaultLanguage = null): self{
+	public static function init(?string $defaultProject = null, ?string $defaultLanguage = null): self{
 		$instance = new self();
-		if($defaultNamespace !== null){
-			$instance->defaultNamespace = $defaultNamespace;
+		if($defaultProject !== null){
+			$instance->defaultProject = $defaultProject;
 		}
 		if($defaultLanguage !== null){
 			$instance->defaultLanguage = $defaultLanguage;
@@ -23,192 +25,183 @@ class TL{
 	}
 
 	public function load(string $path, ?string $prefix = null): void{
-		// list directories
-		$dirs = scandir($path);
-		if($dirs === false){
+		$prefix ??= pathinfo($path, PATHINFO_FILENAME);
+
+		$files = scandir($path);
+		if($files === false){
 			throw new \RuntimeException("Could not scan directory $path");
 		}
-
-		$directories = array_filter($dirs, function(string $file) use ($path): bool{
-			return is_dir($path . "/" . $file) && $file !== "." && $file !== "..";
+		$files = array_filter($files, function(string $file) use ($path): bool{
+			return pathinfo($path . "/" . $file, PATHINFO_EXTENSION) === "json";
 		});
-		foreach($directories as $directory){
-			$namespace = new TLNamespace($directory);
-			$namespace->load($path . "/" . $directory);
-			if (!$namespace->isEmpty()){
-				$namespacePath = $directory;
-				if ($prefix !== null) {
-					$namespacePath = $prefix . "." . $namespacePath;
-				}
-				$this->namespaces[$namespacePath] = $namespace;
+		$languages = [];
+		foreach($files as $file){
+			$filePath = Path::join($path, $file);
+			$file_contents = file_get_contents($filePath);
+			if($file_contents === false){
+				throw new \RuntimeException("Could not read file $filePath");
 			}
+
+			$translations = json_decode($file_contents, true, flags: JSON_THROW_ON_ERROR);
+			if (!is_array($translations)){
+				throw new \RuntimeException("Translation data must be an json object");
+			}
+
+			$translations = $this->generateMapping($prefix . ".", $translations);
+			$languages[str_replace(".json", "", $file)] = $translations;
 		}
-		if(!isset($this->namespaces[$this->defaultNamespace])){
-			throw new \RuntimeException("Default namespace not found");
-		}
-		if(is_null($this->namespaces[$this->defaultNamespace]->getLanguage($this->defaultLanguage))){
-			throw new \RuntimeException("Default language not found");
+		foreach($languages as $language => $translations){
+			if(!isset($this->translations[$language])){
+				$this->translations[$language] = [];
+			}
+			$this->translations[$language] = array_merge($this->translations[$language], $translations);
 		}
 	}
 
 	/**
-	 * @param string[] $namespaces
+	 * @param string[] $projects
 	 *
 	 * @return \Closure[]
 	 */
-	public function useTranslations(?string $lang, array $namespaces): array{
-		return array_map(function(string $namespace) use ($lang): \Closure{
-			return $this->useTranslation($lang, $namespace);
-		}, $namespaces);
+	public function useTranslations(?string $lang, array $projects): array{
+		return array_map(function(string $project) use ($lang): \Closure{
+			return $this->useTranslation($lang, $project);
+		}, $projects);
 	}
 
 	/**
 	 * @return \Closure[]
 	 */
-	public function withDefaultNamespace(?string $lang, string ...$namespaces): array{
-		return $this->useTranslations($lang, array_merge([$this->defaultNamespace], $namespaces));
+	public function withDefault(?string $lang, string ...$prefixes): array{
+		return $this->useTranslations($lang, array_merge([$this->defaultProject], $prefixes));
 	}
 
-	public function useTranslation(?string $lang = null, ?string $namespace = null): \Closure{
-		$namespace ??= $this->defaultNamespace;
+	public function useTranslation(?string $lang = null, ?string $prefix = null): \Closure{
 		$lang ??= $this->defaultLanguage;
+		$prefix ??= $this->defaultProject;
 
-		if(!isset($this->namespaces[$namespace])){
-			throw new \InvalidArgumentException("Namespace $namespace does not exist");
-		}
 		/**
 		 * @param array<string, mixed> $params
 		 */
-		return function(string $key, array $params = []) use ($namespace, $lang): string{
-			return $this->translate($key, $params, $lang, $namespace);
+		return function(string $key, array $params = []) use ($prefix, $lang): string{
+			return $this->translate($prefix . '.' . $key, $params, $lang);
 		};
 	}
 
 	/**
 	 * @param array<string, mixed> $params
 	 */
-	public function translate(string $key, array $params = [], ?string $lang = null, ?string $namespace = null): string{
-		$namespace ??= $this->defaultNamespace;
-		$lang ??= $this->defaultLanguage;
-
-		$ns = $this->namespaces[$namespace] ?? null;
-		if(is_null($ns)){
-			return sprintf("%s:%s", $namespace, $key);
+	public function translate(string $key, array $params = [], ?string $lang = null, bool $resident = true): string{
+		if (is_string($lang) && !array_key_exists($lang, $this->translations)){
+			// convert en_US to en
+			$lang = $this->getFitLangKey($lang, false);
 		}
 
-		$language = $ns->getLanguage($lang);
-		if(is_null($language)){
-			$langParts = explode("_", $lang);
-			if(count($langParts) > 1){
-				$language = $ns->getLanguage($langParts[0]);
+		if (is_null($lang) || !array_key_exists($lang, $this->translations)) {
+			$lang = $this->defaultLanguage;
+		}
+
+		$applyParams = function(string $translation) use ($key, $params): string{
+			$applied = false;
+			foreach($params as $param => $value){
+				if (!is_string($param)){
+					continue;
+				}
+
+				$applied = true;
+				$translation = str_replace("{{" . $param . "}}", strval($value), $translation);
 			}
-		}
 
-		$langTranslation = $language?->getTranslation($key, $params);
+			if (!$applied){
+				$translation = sprintf($translation, ...array_values($params));
+			}
+			return $translation;
+		};
+
+		$langTranslation = $this->translations[$lang][$key] ?? null;
 		if($langTranslation !== null){
-			return $langTranslation;
+			return $applyParams($langTranslation);
 		}
 
-		$defaultLangTranslation = $ns->getLanguage($this->defaultLanguage)?->getTranslation($key, $params);
+		$defaultLangTranslation = $this->translations[$this->defaultLanguage][$key] ?? null;
 		if($defaultLangTranslation !== null){
-			return $defaultLangTranslation;
+			return $applyParams($defaultLangTranslation);
 		}
 
-		return sprintf("%s:%s", $namespace, $key);
-	}
-}
-
-class TLNamespace{
-	/**
-	 * @var TLLanguage[]
-	 */
-	private array $languages = [];
-
-	public function __construct(private string $name){
-	}
-
-	public function getName(): string{
-		return $this->name;
-	}
-
-	public function load(string $path): void{
-		// list json files
-		$dirs = scandir($path);
-		if($dirs === false){
-			throw new \RuntimeException("Could not scan directory $path");
+		if ($resident) {
+			return sprintf("%s.%s", $lang, $key);
 		}
 
-		$files = array_filter($dirs, function(string $file) use ($path): bool{
-			return pathinfo($path . "/" . $file, PATHINFO_EXTENSION) === "json";
-		});
-		foreach($files as $file){
-			$language = new TLLanguage($file);
-			$this->languages[str_replace(".json", "", $file)] = $language;
-			$language->load($path . "/" . $file);
-		}
-	}
-
-	public function getLanguage(string $name): ?TLLanguage{
-		return $this->languages[$name] ?? null;
-	}
-
-	public function isEmpty(): bool{
-		return empty($this->languages);
-	}
-}
-
-class TLLanguage{
-	/**
-	 * @var array<string, string>
-	 */
-	private array $translations = [];
-
-	public function __construct(private string $name){
-	}
-
-	public function getName(): string{
-		return $this->name;
+		throw new \RuntimeException("Translation not found for key $key");
 	}
 
 	/**
-	 * @throws \JsonException
-	 * @throws \RuntimeException
+	 * @param array<string, string | array<string, string>> $translations
+	 * @return array<string, string>
 	 */
-	public function load(string $path): void{
-		$file_contents = file_get_contents($path);
-		if($file_contents === false){
-			throw new \RuntimeException("Could not read file $path");
-		}
-
-		$translations = json_decode($file_contents, true, flags: JSON_THROW_ON_ERROR);
-		if (!is_array($translations)){
-			throw new \RuntimeException("Translation data must be an array");
-		}
-
+	public function generateMapping(string $prefix, array $translations): array{
+		$mapping = [];
 		foreach($translations as $key => $value){
 			if (!is_string($key)){
 				throw new \RuntimeException("Translation key must be a string");
 			}
-			if (!is_string($value)){
-				throw new \RuntimeException("Translation value must be a string");
+			if(is_array($value)){
+				$mapping = array_merge($mapping, $this->generateMapping($prefix . $key . ".", $value));
+			}elseif(is_string($value)){
+				$mapping[$prefix . $key] = $value;
+			} else {
+				throw new \RuntimeException("Translation value must be a string or an array");
+			}
+		}
+		return $mapping;
+	}
+
+	/** @return array<string, array<string, string>> */
+	public function getAllTranslations(): array{
+		return $this->translations;
+	}
+
+	/** @return string[] */
+	public function getLanguages(): array{
+		return array_keys($this->translations);
+	}
+
+	/** @return string[] */
+	public function getLanguagesTranslated(?string $lang = null, ?string $project = null): array{
+		$lang ??= $this->defaultLanguage;
+		$project ??= $this->defaultProject;
+
+		$translated = [];
+		foreach($this->translations as $language => $translations){
+			$translated[$language] = $this->translate($project . ".language.$language", [], $lang, false);
+		}
+		return $translated;
+	}
+
+	public function getFitLangKey(string $lang, bool $default = true): ?string{
+		if (array_key_exists($lang, $this->translations)){
+			return $lang;
+		}
+		$langParts = explode("_", $lang);
+		if(count($langParts) > 1){
+			$lang = $langParts[0];
+			if (array_key_exists($lang, $this->translations)){
+				return $lang;
 			}
 		}
 
-		$this->translations = $translations;
-	}
-
-	/**
-	 * @param array<string, mixed> $params
-	 */
-	public function getTranslation(string $key, array $params = []): ?string{
-		$str = $this->translations[$key] ?? null;
-		if(is_null($str)){
-			return null;
+		$langParts = explode("-", $lang);
+		if(count($langParts) > 1){
+			$lang = $langParts[0];
+			if (array_key_exists($lang, $this->translations)){
+				return $lang;
+			}
 		}
 
-		foreach($params as $key => $value){
-			$str = str_replace("{{" . $key . "}}", strval($value), $str);
+		if ($default) {
+			return $this->defaultLanguage;
 		}
-		return $str;
+
+		return null;
 	}
 }
