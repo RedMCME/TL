@@ -88,6 +88,11 @@ class TL{
 		};
 	}
 
+	public function translateKey(string $key, ?string $lang = null): ?string{
+		$lang ??= $this->defaultLanguage;
+		return $this->translations[$lang][$key] ?? null;
+	}
+
 	/**
 	 * @param array<string, mixed> $params
 	 */
