@@ -117,7 +117,7 @@ class TL{
 				$translation = str_replace("{{" . $param . "}}", strval($value), $translation);
 			}
 
-			if (!$applied){
+			if (!$applied && count($params) > 0){
 				$translation = sprintf($translation, ...array_values($params));
 			}
 			return $translation;
