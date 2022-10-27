@@ -9,7 +9,7 @@ $player->sendMessage($t("message-key"));
 ```
 
 ```php
-$t = $tl->useTranslation("lang", "namespace"));
+$t = $tl->useTranslation($player->getLocale(), "common.prefix"));
 $player->sendMessage($t("message-with-params", [
   "count" => 1
 ]));
@@ -17,7 +17,7 @@ $player->sendMessage($t("message-with-params", [
 
 ### use directly
 ```php
-public function translate(string $key, array $params = [], ?string $lang = null, ?string $namespace = null): string;
+public function translate(string $key, array $params = [], ?string $lang = null, ?string $prefix = null): string;
 ```
 
 ## Get Started
