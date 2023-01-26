@@ -106,7 +106,7 @@ class TL{
 			$lang = $this->defaultLanguage;
 		}
 
-		$applyParams = function(string $translation) use ($params): string{
+		$applyParams = function(string $translation) use ($key, $params): string{
 			$applied = false;
 			foreach($params as $param => $value){
 				if (!is_string($param)){
@@ -117,7 +117,7 @@ class TL{
 				$translation = str_replace("{{" . $param . "}}", strval($value), $translation);
 			}
 
-			if (!$applied){
+			if (!$applied && count($params) > 0){
 				$translation = sprintf($translation, ...array_values($params));
 			}
 			return $translation;
